@@ -50,7 +50,7 @@ export class PanasonicMiraiePlatform {
             await this.session.subscribeToTopics(topics);
             this.log.info(`Subscribed to status topics: ${topics.join(', ')}`);
             for (const device of devices) {
-                const uuid = this.api.hap.uuid.generate(device.data.device_id);
+                const uuid = this.api.hap.uuid.generate(device.data.deviceId);
                 const existingAccessory = this.accessories.get(uuid);
                 if (existingAccessory) {
                     this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);

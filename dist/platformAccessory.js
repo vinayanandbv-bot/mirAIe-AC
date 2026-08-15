@@ -21,7 +21,7 @@ export class PanasonicMiraieAccessory {
         this.accessory.getService(this.platform.Service.AccessoryInformation)
             .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Panasonic')
             .setCharacteristic(this.platform.Characteristic.Model, 'MirAIe AC')
-            .setCharacteristic(this.platform.Characteristic.SerialNumber, device.data.device_id || 'Default-Serial');
+            .setCharacteristic(this.platform.Characteristic.SerialNumber, device.data.deviceId || 'Default-Serial');
         // HEATER COOLER SERVICE
         this.heaterCoolerService = this.accessory.getService(this.platform.Service.HeaterCooler) ||
             this.accessory.addService(this.platform.Service.HeaterCooler);
