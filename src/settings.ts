@@ -1,2 +1,2 @@
-export const PLATFORM_NAME = 'PanasonicMiraieAdvanced';
-export const PLUGIN_NAME = 'homebridge-panasonic-miraie-advanced';
+export const PLATFORM_NAME = 'MirAIeAC';
+export const PLUGIN_NAME = 'homebridge-miraie-ac';

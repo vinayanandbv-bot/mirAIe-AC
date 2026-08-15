@@ -1,5 +1,5 @@
 {
-  "name": "homebridge-panasonic-miraie-advanced",
+  "name": "homebridge-miraie-ac",
   "version": "1.0.0",
   "description": "Advanced Homebridge plugin for Panasonic MirAIe ACs",
   "type": "module",
