@@ -100,6 +100,10 @@ export class PanasonicMiraieAccessory {
     this.ecoSwitch.getCharacteristic(this.platform.Characteristic.On)
       .onSet(async (value) => { 
         this.setOptimisticValue('acec', value ? 'on' : 'off');
+        if (value) {
+          this.setOptimisticValue('acpm', 'off');
+          this.powerfulSwitch.updateCharacteristic(this.platform.Characteristic.On, false);
+        }
         await this.device.setPresetMode(value ? PresetMode.ECO : PresetMode.NONE); 
       })
       .onGet(() => this.getEffectiveStatus()?.acec === 'on' || this.getEffectiveStatus()?.acem === 'on');
@@ -150,6 +154,10 @@ export class PanasonicMiraieAccessory {
     this.powerfulSwitch.getCharacteristic(this.platform.Characteristic.On)
       .onSet(async (value) => { 
         this.setOptimisticValue('acpm', value ? 'on' : 'off');
+        if (value) {
+          this.setOptimisticValue('acec', 'off');
+          this.ecoSwitch.updateCharacteristic(this.platform.Characteristic.On, false);
+        }
         await this.device.setPresetMode(value ? PresetMode.BOOST : PresetMode.NONE); 
       })
       .onGet(() => this.getEffectiveStatus()?.acpm === 'on');
