@@ -13,11 +13,9 @@ export class PanasonicMiraieAccessory {
   private ecoSwitch: Service;
   private powerfulSwitch: Service;
   private cleanSwitch: Service;
-  private hSwingSwitch: Service;
-  private vSwingSwitch: Service;
-
-  // Converti7 switches
-  private convertiSwitches: Map<ConvertiMode, Service> = new Map();
+  private hSwingService: Service;
+  private vSwingService: Service;
+  private convertiService: Service;
 
   constructor(
     private readonly platform: PanasonicMiraiePlatform,
@@ -97,62 +95,119 @@ export class PanasonicMiraieAccessory {
       })
       .onGet(() => this.device.getStatus()?.preset_mode === 'clean');
 
-    this.hSwingSwitch = this.createSwitch('Horizontal Swing', 'hswing-switch');
-    this.hSwingSwitch.getCharacteristic(this.platform.Characteristic.On)
-      .onSet(async (value) => { 
-        this.updateCache('h_swing', value ? 'auto' : '1');
-        await this.device.setHSwingMode(value ? SwingMode.AUTO : SwingMode.ONE); 
-      })
-      .onGet(() => this.device.getStatus()?.h_swing === 'auto');
+    // Remove old switches from cache if they exist
+    const oldHSwing = this.accessory.getServiceById(this.platform.Service.Switch, 'hswing-switch');
+    if (oldHSwing) this.accessory.removeService(oldHSwing);
 
-    this.vSwingSwitch = this.createSwitch('Vertical Swing', 'vswing-switch');
-    this.vSwingSwitch.getCharacteristic(this.platform.Characteristic.On)
-      .onSet(async (value) => { 
-        this.updateCache('v_swing', value ? 'auto' : '1');
-        await this.device.setVSwingMode(value ? SwingMode.AUTO : SwingMode.ONE); 
-      })
-      .onGet(() => this.device.getStatus()?.v_swing === 'auto');
+    const oldVSwing = this.accessory.getServiceById(this.platform.Service.Switch, 'vswing-switch');
+    if (oldVSwing) this.accessory.removeService(oldVSwing);
 
-    // CONVERTI7 SWITCHES (40%, 55%, 70%, 80%, 90%, 100%, 110%)
-    const convertiModes = [
-      { name: 'Converti 40%', mode: ConvertiMode.C40 },
-      { name: 'Converti 55%', mode: ConvertiMode.C55 },
-      { name: 'Converti 70%', mode: ConvertiMode.C70 },
-      { name: 'Converti 80%', mode: ConvertiMode.C80 },
-      { name: 'Converti 90%', mode: ConvertiMode.C90 },
-      { name: 'Converti 100%', mode: ConvertiMode.FC },
-      { name: 'Converti 110%', mode: ConvertiMode.HC },
-    ];
-
-    for (const cm of convertiModes) {
-      const sw = this.createSwitch(cm.name, `converti-${cm.mode}`);
-      sw.getCharacteristic(this.platform.Characteristic.On)
-        .onSet(async (value) => { 
-          // Optimistically update cache
-          this.updateCache('converti_mode', value ? cm.mode : ConvertiMode.OFF);
-          
-          // If turning on, set this mode. If turning off, set to OFF/NS
-          await this.device.setConvertiMode(value ? cm.mode : ConvertiMode.OFF);
-          
-          // Turn off other converti switches in HomeKit UI
-          if (value) {
-            for (const otherCm of convertiModes) {
-              if (otherCm.mode !== cm.mode) {
-                this.convertiSwitches.get(otherCm.mode)?.updateCharacteristic(this.platform.Characteristic.On, false);
-              }
-            }
-          }
-        })
-        .onGet(() => {
-          // We have to guess the status format. Assuming the API uses string values like '40', '55' or similar.
-          // Fallback to false if unsupported.
-          const currentConverti = this.device.getStatus()?.converti_mode;
-          if (currentConverti == null) return false;
-          // In some libraries, it returns string "40" or number 40.
-          return String(currentConverti) === String(cm.mode) || String(currentConverti) === cm.mode.toString();
-        });
-      this.convertiSwitches.set(cm.mode, sw);
+    const oldConvertiModes = [40, 55, 70, 80, 90, 100, 110];
+    for (const mode of oldConvertiModes) {
+      const oldConverti = this.accessory.getServiceById(this.platform.Service.Switch, `converti-${mode}`);
+      if (oldConverti) this.accessory.removeService(oldConverti);
     }
+    // Also try NS and OFF if they were cached
+    const oldConvertiNS = this.accessory.getServiceById(this.platform.Service.Switch, `converti-1`);
+    if (oldConvertiNS) this.accessory.removeService(oldConvertiNS);
+    const oldConvertiOFF = this.accessory.getServiceById(this.platform.Service.Switch, `converti-0`);
+    if (oldConvertiOFF) this.accessory.removeService(oldConvertiOFF);
+
+    this.hSwingService = this.createFanService('Horizontal Swing', 'hswing-fan');
+    this.hSwingService.getCharacteristic(this.platform.Characteristic.On)
+      .onSet(async (value) => {
+        // If turning off, we can't really turn off swing, but maybe set to Auto or Position 3
+        // Since we mapped 0% to Auto, turning off the fan could mean 'Auto' or we just ignore On/Off.
+        // Let's just set to Auto if OFF
+        const mode = value ? SwingMode.AUTO : SwingMode.AUTO; // Just fallback
+        // wait, let's just ignore the On state and rely on RotationSpeed for actual state changes.
+        // Or if On is true, we keep current speed, if false we set to Auto.
+        if (!value) {
+          this.updateCache('h_swing', 'auto');
+          await this.device.setHSwingMode(SwingMode.AUTO);
+          this.hSwingService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 0);
+        }
+      })
+      .onGet(() => {
+        const mode = this.device.getStatus()?.h_swing;
+        // The fan is 'On' if it's not auto, or maybe just always On so the slider is visible
+        return true; 
+      });
+
+    this.hSwingService.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+      .setProps({ minValue: 0, maxValue: 100, minStep: 20 })
+      .onSet(async (value) => {
+        const speed = value as number;
+        const mode = this.getSwingModeFromSpeed(speed);
+        const modeStr = mode === SwingMode.AUTO ? 'auto' : String(mode);
+        this.updateCache('h_swing', modeStr);
+        await this.device.setHSwingMode(mode);
+      })
+      .onGet(() => {
+        return this.getSwingSpeedFromMode(this.device.getStatus()?.h_swing);
+      });
+
+
+    this.vSwingService = this.createFanService('Vertical Swing', 'vswing-fan');
+    this.vSwingService.getCharacteristic(this.platform.Characteristic.On)
+      .onSet(async (value) => {
+        if (!value) {
+          this.updateCache('v_swing', 'auto');
+          await this.device.setVSwingMode(SwingMode.AUTO);
+          this.vSwingService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 0);
+        }
+      })
+      .onGet(() => true);
+
+    this.vSwingService.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+      .setProps({ minValue: 0, maxValue: 100, minStep: 20 })
+      .onSet(async (value) => {
+        const speed = value as number;
+        const mode = this.getSwingModeFromSpeed(speed);
+        const modeStr = mode === SwingMode.AUTO ? 'auto' : String(mode);
+        this.updateCache('v_swing', modeStr);
+        await this.device.setVSwingMode(mode);
+      })
+      .onGet(() => {
+        return this.getSwingSpeedFromMode(this.device.getStatus()?.v_swing);
+      });
+
+
+    this.convertiService = this.createFanService('Converti Mode', 'converti-fan');
+    this.convertiService.getCharacteristic(this.platform.Characteristic.On)
+      .onSet(async (value) => {
+        if (!value) {
+          this.updateCache('converti_mode', ConvertiMode.OFF);
+          await this.device.setConvertiMode(ConvertiMode.OFF);
+          this.convertiService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 0);
+        } else {
+          // If turned ON without slider, default to 100% (FC)
+          this.updateCache('converti_mode', ConvertiMode.FC);
+          await this.device.setConvertiMode(ConvertiMode.FC);
+          this.convertiService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 90);
+        }
+      })
+      .onGet(() => {
+        const mode = this.device.getStatus()?.converti_mode;
+        return mode != null && mode !== ConvertiMode.OFF && mode !== ConvertiMode.NS && mode !== 0;
+      });
+
+    this.convertiService.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+      .setProps({ minValue: 0, maxValue: 100, minStep: 15 })
+      .onSet(async (value) => {
+        const speed = value as number;
+        const mode = this.getConvertiModeFromSpeed(speed);
+        this.updateCache('converti_mode', mode);
+        await this.device.setConvertiMode(mode);
+        if (speed === 0) {
+          this.convertiService.updateCharacteristic(this.platform.Characteristic.On, false);
+        } else {
+          this.convertiService.updateCharacteristic(this.platform.Characteristic.On, true);
+        }
+      })
+      .onGet(() => {
+        return this.getConvertiSpeedFromMode(this.device.getStatus()?.converti_mode);
+      });
 
     // Subscribe to MQTT updates if available to update HomeKit in real-time
     const mqttClient = this.platform.session?.getMqttClient();
@@ -174,6 +229,13 @@ export class PanasonicMiraieAccessory {
   private createSwitch(name: string, subtype: string): Service {
     const service = this.accessory.getServiceById(this.platform.Service.Switch, subtype) 
       || this.accessory.addService(this.platform.Service.Switch, name, subtype);
+    service.setCharacteristic(this.platform.Characteristic.Name, name);
+    return service;
+  }
+
+  private createFanService(name: string, subtype: string): Service {
+    const service = this.accessory.getServiceById(this.platform.Service.Fanv2, subtype) 
+      || this.accessory.addService(this.platform.Service.Fanv2, name, subtype);
     service.setCharacteristic(this.platform.Characteristic.Name, name);
     return service;
   }
@@ -205,12 +267,12 @@ export class PanasonicMiraieAccessory {
         this.ecoSwitch.updateCharacteristic(this.platform.Characteristic.On, status.preset_mode === 'eco');
         this.powerfulSwitch.updateCharacteristic(this.platform.Characteristic.On, status.preset_mode === 'boost');
         this.cleanSwitch.updateCharacteristic(this.platform.Characteristic.On, status.preset_mode === 'clean');
-        this.hSwingSwitch.updateCharacteristic(this.platform.Characteristic.On, status.h_swing === 'auto');
-        this.vSwingSwitch.updateCharacteristic(this.platform.Characteristic.On, status.v_swing === 'auto');
+        this.hSwingService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, this.getSwingSpeedFromMode(status.h_swing));
+        this.vSwingService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, this.getSwingSpeedFromMode(status.v_swing));
         
-        for (const [mode, sw] of this.convertiSwitches.entries()) {
-          sw.updateCharacteristic(this.platform.Characteristic.On, String(status.converti_mode) === String(mode));
-        }
+        const convertiSpeed = this.getConvertiSpeedFromMode(status.converti_mode);
+        this.convertiService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, convertiSpeed);
+        this.convertiService.updateCharacteristic(this.platform.Characteristic.On, convertiSpeed > 0);
       }
     } catch (error) {
       this.platform.log.debug('Failed to update characteristics', error);
@@ -341,5 +403,47 @@ export class PanasonicMiraieAccessory {
 
   async getFanSpeed(): Promise<CharacteristicValue> {
     return this.getFanSpeedSync();
+  }
+
+  private getConvertiSpeedFromMode(mode: any): number {
+    const s = String(mode);
+    if (s === String(ConvertiMode.C40) || s === '40') return 15;
+    if (s === String(ConvertiMode.C55) || s === '55') return 30;
+    if (s === String(ConvertiMode.C70) || s === '70') return 45;
+    if (s === String(ConvertiMode.C80) || s === '80') return 60;
+    if (s === String(ConvertiMode.C90) || s === '90') return 75;
+    if (s === String(ConvertiMode.FC) || s === '100') return 90;
+    if (s === String(ConvertiMode.HC) || s === '110') return 100;
+    return 0;
+  }
+
+  private getConvertiModeFromSpeed(speed: number): ConvertiMode {
+    if (speed === 0) return ConvertiMode.OFF;
+    if (speed <= 15) return ConvertiMode.C40;
+    if (speed <= 30) return ConvertiMode.C55;
+    if (speed <= 45) return ConvertiMode.C70;
+    if (speed <= 60) return ConvertiMode.C80;
+    if (speed <= 75) return ConvertiMode.C90;
+    if (speed <= 90) return ConvertiMode.FC;
+    return ConvertiMode.HC;
+  }
+
+  private getSwingSpeedFromMode(mode: any): number {
+    const s = String(mode);
+    if (s === '1' || s === String(SwingMode.ONE)) return 20;
+    if (s === '2' || s === String(SwingMode.TWO)) return 40;
+    if (s === '3' || s === String(SwingMode.THREE)) return 60;
+    if (s === '4' || s === String(SwingMode.FOUR)) return 80;
+    if (s === '5' || s === String(SwingMode.FIVE)) return 100;
+    return 0; // Auto
+  }
+
+  private getSwingModeFromSpeed(speed: number): SwingMode {
+    if (speed === 0) return SwingMode.AUTO;
+    if (speed <= 20) return SwingMode.ONE;
+    if (speed <= 40) return SwingMode.TWO;
+    if (speed <= 60) return SwingMode.THREE;
+    if (speed <= 80) return SwingMode.FOUR;
+    return SwingMode.FIVE;
   }
 }

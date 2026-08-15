@@ -10,11 +10,12 @@ export declare class PanasonicMiraieAccessory {
     private ecoSwitch;
     private powerfulSwitch;
     private cleanSwitch;
-    private hSwingSwitch;
-    private vSwingSwitch;
-    private convertiSwitches;
+    private hSwingService;
+    private vSwingService;
+    private convertiService;
     constructor(platform: PanasonicMiraiePlatform, accessory: PlatformAccessory, device: FluentDevice);
     private createSwitch;
+    private createFanService;
     private updateHomeKitCharacteristics;
     private getActiveSync;
     private getCurrentTemperatureSync;
@@ -32,4 +33,8 @@ export declare class PanasonicMiraieAccessory {
     getTargetTemperature(): Promise<CharacteristicValue>;
     setFanSpeed(value: CharacteristicValue): Promise<void>;
     getFanSpeed(): Promise<CharacteristicValue>;
+    private getConvertiSpeedFromMode;
+    private getConvertiModeFromSpeed;
+    private getSwingSpeedFromMode;
+    private getSwingModeFromSpeed;
 }
