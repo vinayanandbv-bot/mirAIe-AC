@@ -13,7 +13,6 @@ export class PanasonicMiraieAccessory {
   private ecoSwitch: Service;
   private powerfulSwitch: Service;
   private cleanSwitch: Service;
-  private drySwitch: Service;
   private fanModeSwitch: Service;
   private hSwingService: Service;
   private vSwingService: Service;
@@ -57,6 +56,7 @@ export class PanasonicMiraieAccessory {
         validValues: [
           this.platform.Characteristic.TargetHeatingCoolingState.OFF,
           this.platform.Characteristic.TargetHeatingCoolingState.COOL,
+          this.platform.Characteristic.TargetHeatingCoolingState.HEAT,
           this.platform.Characteristic.TargetHeatingCoolingState.AUTO,
         ]
       })
@@ -116,23 +116,6 @@ export class PanasonicMiraieAccessory {
       })
       .onGet(() => false); // Clean usually doesn't stick
 
-    this.drySwitch = this.createSwitch('Dry Mode', 'dry-mode');
-    this.drySwitch.getCharacteristic(this.platform.Characteristic.On)
-      .onSet(async (value) => {
-        if (value) {
-           this.setOptimisticValue('ps', 'on');
-           this.setOptimisticValue('acmd', 'dry');
-           await this.device.turnOn();
-           await this.device.setHvacMode(HVACMode.DRY);
-           this.fanModeSwitch.updateCharacteristic(this.platform.Characteristic.On, false);
-           this.thermostatService.updateCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState, this.platform.Characteristic.TargetHeatingCoolingState.COOL);
-        } else {
-           this.setOptimisticValue('acmd', 'cool');
-           await this.device.setHvacMode(HVACMode.COOL);
-        }
-      })
-      .onGet(() => this.getEffectiveStatus()?.acmd === 'dry');
-
     this.fanModeSwitch = this.createSwitch('Fan Only Mode', 'fan-only-mode');
     this.fanModeSwitch.getCharacteristic(this.platform.Characteristic.On)
       .onSet(async (value) => {
@@ -141,14 +124,24 @@ export class PanasonicMiraieAccessory {
            this.setOptimisticValue('acmd', 'fan');
            await this.device.turnOn();
            await this.device.setHvacMode(HVACMode.FAN);
-           this.drySwitch.updateCharacteristic(this.platform.Characteristic.On, false);
-           this.thermostatService.updateCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState, this.platform.Characteristic.TargetHeatingCoolingState.COOL);
         } else {
-           this.setOptimisticValue('acmd', 'cool');
-           await this.device.setHvacMode(HVACMode.COOL);
+           const dialState = this.thermostatService.getCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState).value;
+           if (dialState === this.platform.Characteristic.TargetHeatingCoolingState.HEAT) {
+             this.setOptimisticValue('acmd', 'dry');
+             await this.device.setHvacMode(HVACMode.DRY);
+           } else if (dialState === this.platform.Characteristic.TargetHeatingCoolingState.AUTO) {
+             this.setOptimisticValue('acmd', 'auto');
+             await this.device.setHvacMode(HVACMode.AUTO);
+           } else {
+             this.setOptimisticValue('acmd', 'cool');
+             await this.device.setHvacMode(HVACMode.COOL);
+           }
         }
       })
       .onGet(() => this.getEffectiveStatus()?.acmd === 'fan');
+
+    const oldDryMode = this.accessory.getServiceById(this.platform.Service.Switch, 'dry-mode');
+    if (oldDryMode) this.accessory.removeService(oldDryMode);
 
     this.powerfulSwitch = this.createSwitch('Powerful', 'powerful-switch');
     this.powerfulSwitch.getCharacteristic(this.platform.Characteristic.On)
@@ -332,7 +325,6 @@ export class PanasonicMiraieAccessory {
         this.ecoSwitch.updateCharacteristic(this.platform.Characteristic.On, status.acec === 'on' || status.acem === 'on');
         this.powerfulSwitch.updateCharacteristic(this.platform.Characteristic.On, status.acpm === 'on');
         
-        this.drySwitch.updateCharacteristic(this.platform.Characteristic.On, status.acmd === 'dry');
         this.fanModeSwitch.updateCharacteristic(this.platform.Characteristic.On, status.acmd === 'fan');
 
         // clean mode usually sets acec to on
@@ -363,6 +355,13 @@ export class PanasonicMiraieAccessory {
     }
     if (status.acmd === 'auto') {
       return this.platform.Characteristic.TargetHeatingCoolingState.AUTO;
+    }
+    if (status.acmd === 'dry') {
+      return this.platform.Characteristic.TargetHeatingCoolingState.HEAT;
+    }
+    if (status.acmd === 'fan') {
+      // Fan mode forces the dial to stay on its last known state visually
+      return this.thermostatService.getCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState).value || this.platform.Characteristic.TargetHeatingCoolingState.COOL;
     }
     return this.platform.Characteristic.TargetHeatingCoolingState.COOL;
   }
@@ -398,15 +397,15 @@ export class PanasonicMiraieAccessory {
       if (value === this.platform.Characteristic.TargetHeatingCoolingState.AUTO) {
         this.setOptimisticValue('acmd', 'auto');
         await this.device.setHvacMode(HVACMode.AUTO);
+      } else if (value === this.platform.Characteristic.TargetHeatingCoolingState.HEAT) {
+        this.setOptimisticValue('acmd', 'dry');
+        await this.device.setHvacMode(HVACMode.DRY);
       } else {
-        // If it's already in dry or fan, we don't forcefully overwrite it to cool unless necessary,
-        // but for safety, setting it to COOL on the dial sets it to cool mode.
-        const currentMode = this.getEffectiveStatus()?.acmd;
-        if (currentMode !== 'dry' && currentMode !== 'fan') {
-          this.setOptimisticValue('acmd', 'cool');
-          await this.device.setHvacMode(HVACMode.COOL);
-        }
+        this.setOptimisticValue('acmd', 'cool');
+        await this.device.setHvacMode(HVACMode.COOL);
       }
+      // Any dial mode change explicitly breaks fan mode
+      this.fanModeSwitch.updateCharacteristic(this.platform.Characteristic.On, false);
     } else {
       await this.device.turnOff();
     }
@@ -424,6 +423,22 @@ export class PanasonicMiraieAccessory {
     const temp = value as number;
     this.setOptimisticValue('actmp', String(temp));
     await this.device.setTemperature(temp);
+    
+    // Changing temperature breaks Fan mode and restores dial mode
+    if (this.getEffectiveStatus()?.acmd === 'fan') {
+      const dialState = this.thermostatService.getCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState).value;
+      if (dialState === this.platform.Characteristic.TargetHeatingCoolingState.HEAT) {
+        this.setOptimisticValue('acmd', 'dry');
+        await this.device.setHvacMode(HVACMode.DRY);
+      } else if (dialState === this.platform.Characteristic.TargetHeatingCoolingState.AUTO) {
+        this.setOptimisticValue('acmd', 'auto');
+        await this.device.setHvacMode(HVACMode.AUTO);
+      } else {
+        this.setOptimisticValue('acmd', 'cool');
+        await this.device.setHvacMode(HVACMode.COOL);
+      }
+      this.fanModeSwitch.updateCharacteristic(this.platform.Characteristic.On, false);
+    }
   }
 
   async getTargetTemperature(): Promise<CharacteristicValue> {
