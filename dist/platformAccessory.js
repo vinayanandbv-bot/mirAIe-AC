@@ -103,6 +103,7 @@ export class PanasonicMiraieAccessory {
                 this.setOptimisticValue('ps', 'on');
                 this.setOptimisticValue('acmd', 'fan');
                 await this.device.turnOn();
+                this.enforceDisplayState();
                 await this.device.setHvacMode(HVACMode.FAN);
             }
             else {
@@ -353,6 +354,7 @@ export class PanasonicMiraieAccessory {
         this.setOptimisticValue('ps', isOn ? 'on' : 'off');
         if (isOn) {
             await this.device.turnOn();
+            this.enforceDisplayState();
             if (value === this.platform.Characteristic.TargetHeatingCoolingState.AUTO) {
                 this.setOptimisticValue('acmd', 'auto');
                 await this.device.setHvacMode(HVACMode.AUTO);
@@ -370,6 +372,20 @@ export class PanasonicMiraieAccessory {
         }
         else {
             await this.device.turnOff();
+            this.enforceDisplayState();
+        }
+    }
+    async enforceDisplayState() {
+        // Wait 1.5 seconds to let the physical AC finish its power-on/off beep and firmware routine
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Read the user's desired display state from our optimistic cache
+        const displayShouldBeOn = this.getEffectiveStatus()?.acdc === 'on';
+        // Force the AC to obey the user's display toggle
+        try {
+            await this.device.setDisplayMode(displayShouldBeOn ? DisplayMode.ON : DisplayMode.OFF);
+        }
+        catch (err) {
+            this.platform.log.debug('Failed to enforce display state', err);
         }
     }
     async getCurrentState() {
