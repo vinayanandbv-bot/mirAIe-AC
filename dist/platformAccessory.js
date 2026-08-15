@@ -376,13 +376,15 @@ export class PanasonicMiraieAccessory {
         }
     }
     async enforceDisplayState() {
-        // Wait 1.5 seconds to let the physical AC finish its power-on/off beep and firmware routine
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Wait 4 seconds to let the physical AC finish its power-on/off beep and firmware routine
+        await new Promise(resolve => setTimeout(resolve, 4000));
         // Read the user's desired display state from our optimistic cache
         const displayShouldBeOn = this.getEffectiveStatus()?.acdc === 'on';
+        this.platform.log.info(`[DEBUG] enforceDisplayState fired. displayShouldBeOn=${displayShouldBeOn}`);
         // Force the AC to obey the user's display toggle
         try {
             await this.device.setDisplayMode(displayShouldBeOn ? DisplayMode.ON : DisplayMode.OFF);
+            this.platform.log.info(`[DEBUG] enforceDisplayState successfully sent ${displayShouldBeOn ? 'ON' : 'OFF'}`);
         }
         catch (err) {
             this.platform.log.debug('Failed to enforce display state', err);
