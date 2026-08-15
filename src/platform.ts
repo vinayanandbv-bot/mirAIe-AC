@@ -62,9 +62,9 @@ export class PanasonicMiraiePlatform implements DynamicPlatformPlugin {
       this.log.info(`Subscribed to status topics: ${topics.join(', ')}`);
 
       for (const device of devices) {
-        // Append '-v2' to the deviceId so iOS treats it as a brand new accessory.
+        // Append '-v3' to the deviceId so iOS treats it as a brand new accessory.
         // This fixes the iOS Home app cache corruption where it remembers the old HeaterCooler states (like 23.0).
-        const uuid = this.api.hap.uuid.generate(device.data.deviceId + '-v2');
+        const uuid = this.api.hap.uuid.generate(device.data.deviceId + '-v3');
         const existingAccessory = this.accessories.get(uuid);
 
         if (existingAccessory) {
