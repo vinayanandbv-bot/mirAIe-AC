@@ -419,8 +419,8 @@ export class PanasonicMiraieAccessory {
   }
 
   private async enforceDisplayState(displayShouldBeOn: boolean) {
-    // Wait 4 seconds to let the physical AC finish its power-on/off beep and firmware routine
-    await new Promise(resolve => setTimeout(resolve, 4000));
+    // Wait 1.5 seconds to let the physical AC finish its power-on/off beep and firmware routine
+    await new Promise(resolve => setTimeout(resolve, 1500));
     
     this.platform.log.info(`[DEBUG] enforceDisplayState fired. displayShouldBeOn=${displayShouldBeOn}`);
     
