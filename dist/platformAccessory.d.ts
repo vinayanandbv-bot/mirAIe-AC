@@ -5,7 +5,7 @@ export declare class PanasonicMiraieAccessory {
     private readonly platform;
     private readonly accessory;
     private readonly device;
-    private heaterCoolerService;
+    private thermostatService;
     private displaySwitch;
     private ecoSwitch;
     private powerfulSwitch;
@@ -13,7 +13,7 @@ export declare class PanasonicMiraieAccessory {
     private hSwingService;
     private vSwingService;
     private convertiService;
-    private temperatureSensorService;
+    private mainFanService;
     private optimisticState;
     private setOptimisticValue;
     private getEffectiveStatus;
@@ -21,15 +21,11 @@ export declare class PanasonicMiraieAccessory {
     private createSwitch;
     private createFanService;
     private updateHomeKitCharacteristics;
-    private getActiveSync;
-    private getCurrentTemperatureSync;
-    private getTargetStateSync;
     private getCurrentStateSync;
+    private getTargetStateSync;
+    private getCurrentTemperatureSync;
     private getFanSpeedSync;
-    setActive(value: CharacteristicValue): Promise<void>;
-    getActive(): Promise<CharacteristicValue>;
     setTargetState(value: CharacteristicValue): Promise<void>;
-    getTargetState(): Promise<CharacteristicValue>;
     getCurrentState(): Promise<CharacteristicValue>;
     getCurrentTemperature(): Promise<CharacteristicValue>;
     setTargetTemperature(value: CharacteristicValue): Promise<void>;

@@ -6,7 +6,7 @@ import {
 } from 'miraie-ac-js';
 
 export class PanasonicMiraieAccessory {
-  private heaterCoolerService: Service;
+  private thermostatService: Service;
   
   // Extra switches
   private displaySwitch: Service;
@@ -16,7 +16,7 @@ export class PanasonicMiraieAccessory {
   private hSwingService: Service;
   private vSwingService: Service;
   private convertiService: Service;
-  private temperatureSensorService: Service;
+  private mainFanService: Service;
 
   // Persistent cache for rubber-banding fix and startup
   private optimisticState: Record<string, any> = {};
@@ -41,54 +41,48 @@ export class PanasonicMiraieAccessory {
       .setCharacteristic(this.platform.Characteristic.Model, 'MirAIe AC')
       .setCharacteristic(this.platform.Characteristic.SerialNumber, device.data.deviceId || 'Default-Serial');
 
-    // HEATER COOLER SERVICE
-    this.heaterCoolerService = this.accessory.getService(this.platform.Service.HeaterCooler) || 
-      this.accessory.addService(this.platform.Service.HeaterCooler);
-    this.heaterCoolerService.setCharacteristic(this.platform.Characteristic.Name, accessory.displayName);
+    // THERMOSTAT SERVICE
+    this.thermostatService = this.accessory.getService(this.platform.Service.Thermostat) ||
+      this.accessory.addService(this.platform.Service.Thermostat);
 
-    this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.Active)
-      .onSet(this.setActive.bind(this))
-      .onGet(this.getActive.bind(this));
+    this.thermostatService.setCharacteristic(this.platform.Characteristic.Name, accessory.displayName);
 
-    this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState)
+    this.thermostatService.getCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState)
+      .onGet(this.getCurrentStateSync.bind(this));
+
+    this.thermostatService.getCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState)
       .setProps({
         validValues: [
-          this.platform.Characteristic.TargetHeaterCoolerState.COOL
+          this.platform.Characteristic.TargetHeatingCoolingState.OFF,
+          this.platform.Characteristic.TargetHeatingCoolingState.COOL
         ]
       })
       .onSet(this.setTargetState.bind(this))
-      .onGet(this.getTargetState.bind(this));
+      .onGet(this.getTargetStateSync.bind(this));
 
-    this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState)
-      .onGet(this.getCurrentState.bind(this));
+    this.thermostatService.getCharacteristic(this.platform.Characteristic.CurrentTemperature)
+      .onGet(this.getCurrentTemperatureSync.bind(this));
 
-    this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.CurrentTemperature)
-      .onGet(this.getCurrentTemperature.bind(this));
-
-    this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature)
+    this.thermostatService.getCharacteristic(this.platform.Characteristic.TargetTemperature)
       .setProps({ minValue: 16, maxValue: 30, minStep: 1 })
       .onSet(this.setTargetTemperature.bind(this))
       .onGet(this.getTargetTemperature.bind(this));
+    
+    this.thermostatService.getCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits)
+      .onGet(() => this.platform.Characteristic.TemperatureDisplayUnits.CELSIUS);
 
-    this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
-      .setProps({ minValue: 16, maxValue: 30, minStep: 1 })
-      .onSet(this.setTargetTemperature.bind(this))
-      .onGet(this.getTargetTemperature.bind(this));
-
-    this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+    // MAIN FAN SERVICE
+    this.mainFanService = this.createFanService('Fan Speed', 'main-fan');
+    this.mainFanService.getCharacteristic(this.platform.Characteristic.RotationSpeed)
       .setProps({ minValue: 0, maxValue: 100, minStep: 25 })
       .onSet(this.setFanSpeed.bind(this))
       .onGet(this.getFanSpeed.bind(this));
 
-    // TEMPERATURE SENSOR
-    this.temperatureSensorService = this.accessory.getService(this.platform.Service.TemperatureSensor) ||
-      this.accessory.addService(this.platform.Service.TemperatureSensor, 'Room Temperature');
-    this.temperatureSensorService.setCharacteristic(this.platform.Characteristic.Name, 'Room Temperature');
-    if (this.platform.Characteristic.ConfiguredName) {
-      this.temperatureSensorService.setCharacteristic(this.platform.Characteristic.ConfiguredName, 'Room Temperature');
-    }
-    this.temperatureSensorService.getCharacteristic(this.platform.Characteristic.CurrentTemperature)
-      .onGet(this.getCurrentTemperature.bind(this));
+    // Remove old services
+    const oldHeaterCooler = this.accessory.getService(this.platform.Service.HeaterCooler);
+    if (oldHeaterCooler) this.accessory.removeService(oldHeaterCooler);
+    const oldTempSensor = this.accessory.getService(this.platform.Service.TemperatureSensor);
+    if (oldTempSensor) this.accessory.removeService(oldTempSensor);
 
     // AUXILIARY SWITCHES
     this.displaySwitch = this.createSwitch('AC Display', 'display-switch');
@@ -144,12 +138,6 @@ export class PanasonicMiraieAccessory {
     this.hSwingService = this.createFanService('Horizontal Swing', 'hswing-fan');
     this.hSwingService.getCharacteristic(this.platform.Characteristic.On)
       .onSet(async (value) => {
-        // If turning off, we can't really turn off swing, but maybe set to Auto or Position 3
-        // Since we mapped 0% to Auto, turning off the fan could mean 'Auto' or we just ignore On/Off.
-        // Let's just set to Auto if OFF
-        const mode = value ? SwingMode.AUTO : SwingMode.AUTO; // Just fallback
-        // wait, let's just ignore the On state and rely on RotationSpeed for actual state changes.
-        // Or if On is true, we keep current speed, if false we set to Auto.
         if (!value) {
           this.setOptimisticValue('h_swing', 'auto');
           await this.device.setHSwingMode(SwingMode.AUTO);
@@ -205,7 +193,6 @@ export class PanasonicMiraieAccessory {
           await this.device.setConvertiMode(ConvertiMode.OFF);
           this.convertiService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 0);
         } else {
-          // If turned ON without slider, default to 100% (FC)
           this.setOptimisticValue('converti_mode', ConvertiMode.FC);
           await this.device.setConvertiMode(ConvertiMode.FC);
           this.convertiService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 90);
@@ -239,8 +226,6 @@ export class PanasonicMiraieAccessory {
       mqttClient.on('message', (topic: string, message: Buffer) => {
         if (topic.includes(this.device.data.topic[0])) {
           try {
-            // Usually the state is updated internally by `miraie-ac-js` but we should trigger HomeKit updates
-            // We can just call get methods on characteristics to force an update.
             this.updateHomeKitCharacteristics();
           } catch (e) {
             this.platform.log.error('Error handling mqtt message', e);
@@ -271,27 +256,18 @@ export class PanasonicMiraieAccessory {
   }
 
   private updateHomeKitCharacteristics() {
-    // This function can be expanded to actively push updates to HomeKit
-    // For now we rely on HomeKit's polling via onGet handlers which read the latest `getStatus()` cache
-    // But forcing an update ensures real-time responsiveness.
     try {
-      this.heaterCoolerService.updateCharacteristic(
-        this.platform.Characteristic.Active, this.getActiveSync()
+      this.thermostatService.updateCharacteristic(
+        this.platform.Characteristic.CurrentHeatingCoolingState, this.getCurrentStateSync()
       );
-      this.heaterCoolerService.updateCharacteristic(
+      this.thermostatService.updateCharacteristic(
+        this.platform.Characteristic.TargetHeatingCoolingState, this.getTargetStateSync()
+      );
+      this.thermostatService.updateCharacteristic(
         this.platform.Characteristic.CurrentTemperature, this.getCurrentTemperatureSync()
       );
-      this.heaterCoolerService.updateCharacteristic(
-        this.platform.Characteristic.TargetHeaterCoolerState, this.getTargetStateSync()
-      );
-      this.heaterCoolerService.updateCharacteristic(
-        this.platform.Characteristic.CurrentHeaterCoolerState, this.getCurrentStateSync()
-      );
-      this.heaterCoolerService.updateCharacteristic(
+      this.mainFanService.updateCharacteristic(
         this.platform.Characteristic.RotationSpeed, this.getFanSpeedSync()
-      );
-      this.temperatureSensorService.updateCharacteristic(
-        this.platform.Characteristic.CurrentTemperature, this.getCurrentTemperatureSync()
       );
       
       const status = this.getEffectiveStatus();
@@ -312,41 +288,26 @@ export class PanasonicMiraieAccessory {
     }
   }
 
-  // Sync getters for updateHomeKitCharacteristics
-  private getActiveSync(): CharacteristicValue {
+  private getCurrentStateSync(): CharacteristicValue {
     const status = this.getEffectiveStatus();
-    return status?.power === 'on' 
-      ? this.platform.Characteristic.Active.ACTIVE 
-      : this.platform.Characteristic.Active.INACTIVE;
+    if (!status || status.power === 'off') {
+      return this.platform.Characteristic.CurrentHeatingCoolingState.OFF;
+    }
+    return this.platform.Characteristic.CurrentHeatingCoolingState.COOL;
+  }
+
+  private getTargetStateSync(): CharacteristicValue {
+    const status = this.getEffectiveStatus();
+    if (!status || status.power === 'off') {
+      return this.platform.Characteristic.TargetHeatingCoolingState.OFF;
+    }
+    return this.platform.Characteristic.TargetHeatingCoolingState.COOL;
   }
 
   private getCurrentTemperatureSync(): CharacteristicValue {
     const status = this.getEffectiveStatus();
     const temp = status?.room_temperature || status?.temperature || 24;
     return temp;
-  }
-
-  private getTargetStateSync(): CharacteristicValue {
-    const status = this.getEffectiveStatus();
-    if (!status) return this.platform.Characteristic.TargetHeaterCoolerState.COOL;
-    switch (status.mode) {
-      case 'cool': return this.platform.Characteristic.TargetHeaterCoolerState.COOL;
-      case 'heat': return this.platform.Characteristic.TargetHeaterCoolerState.COOL; // Override to Cool
-      default: return this.platform.Characteristic.TargetHeaterCoolerState.COOL; // Override to Cool
-    }
-  }
-
-  private getCurrentStateSync(): CharacteristicValue {
-    const status = this.getEffectiveStatus();
-    if (!status || status.power === 'off') {
-      return this.platform.Characteristic.CurrentHeaterCoolerState.INACTIVE;
-    }
-    switch (status.mode) {
-      case 'cool': return this.platform.Characteristic.CurrentHeaterCoolerState.COOLING;
-      case 'heat': return this.platform.Characteristic.CurrentHeaterCoolerState.HEATING;
-      case 'fan': return this.platform.Characteristic.CurrentHeaterCoolerState.IDLE;
-      default: return this.platform.Characteristic.CurrentHeaterCoolerState.IDLE; // auto could be idle depending on temp
-    }
   }
 
   private getFanSpeedSync(): CharacteristicValue {
@@ -358,39 +319,22 @@ export class PanasonicMiraieAccessory {
       case 'medium': return 75;
       case 'high': return 100;
       case 'auto':
-      default: return 0; // Auto mapped to 0 or could just let HomeKit handle auto differently
+      default: return 0;
     }
   }
 
-
   // Characteristic Handlers
-  async setActive(value: CharacteristicValue) {
-    const isOn = value === this.platform.Characteristic.Active.ACTIVE;
+  async setTargetState(value: CharacteristicValue) {
+    const isOn = value !== this.platform.Characteristic.TargetHeatingCoolingState.OFF;
     this.setOptimisticValue('power', isOn ? 'on' : 'off');
     
     if (isOn) {
       await this.device.turnOn();
+      this.setOptimisticValue('mode', 'cool');
+      await this.device.setHvacMode(HVACMode.COOL);
     } else {
       await this.device.turnOff();
     }
-  }
-
-  async getActive(): Promise<CharacteristicValue> {
-    return this.getActiveSync();
-  }
-
-  async setTargetState(value: CharacteristicValue) {
-    let mode = HVACMode.AUTO;
-    let modeStr = 'auto';
-    if (value === this.platform.Characteristic.TargetHeaterCoolerState.COOL) { mode = HVACMode.COOL; modeStr = 'cool'; }
-    if (value === this.platform.Characteristic.TargetHeaterCoolerState.HEAT) { mode = HVACMode.HEAT; modeStr = 'heat'; }
-    
-    this.setOptimisticValue('mode', modeStr);
-    await this.device.setHvacMode(mode);
-  }
-
-  async getTargetState(): Promise<CharacteristicValue> {
-    return this.getTargetStateSync();
   }
 
   async getCurrentState(): Promise<CharacteristicValue> {
