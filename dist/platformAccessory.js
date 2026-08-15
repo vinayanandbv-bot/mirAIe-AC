@@ -12,6 +12,22 @@ export class PanasonicMiraieAccessory {
     hSwingService;
     vSwingService;
     convertiService;
+    temperatureSensorService;
+    // Debouncing cache for rubber-banding fix
+    optimisticState = {};
+    optimisticTimeouts = {};
+    setOptimisticValue(key, value) {
+        this.optimisticState[key] = value;
+        if (this.optimisticTimeouts[key])
+            clearTimeout(this.optimisticTimeouts[key]);
+        this.optimisticTimeouts[key] = setTimeout(() => {
+            delete this.optimisticState[key];
+        }, 5000);
+    }
+    getEffectiveStatus() {
+        const realStatus = this.device.getStatus() || {};
+        return { ...realStatus, ...this.optimisticState };
+    }
     constructor(platform, accessory, device) {
         this.platform = platform;
         this.accessory = accessory;
@@ -29,6 +45,11 @@ export class PanasonicMiraieAccessory {
             .onSet(this.setActive.bind(this))
             .onGet(this.getActive.bind(this));
         this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState)
+            .setProps({
+            validValues: [
+                this.platform.Characteristic.TargetHeaterCoolerState.COOL
+            ]
+        })
             .onSet(this.setTargetState.bind(this))
             .onGet(this.getTargetState.bind(this));
         this.heaterCoolerService.getCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState)
@@ -47,35 +68,44 @@ export class PanasonicMiraieAccessory {
             .setProps({ minValue: 0, maxValue: 100, minStep: 25 })
             .onSet(this.setFanSpeed.bind(this))
             .onGet(this.getFanSpeed.bind(this));
+        // TEMPERATURE SENSOR
+        this.temperatureSensorService = this.accessory.getService(this.platform.Service.TemperatureSensor) ||
+            this.accessory.addService(this.platform.Service.TemperatureSensor, 'Room Temperature');
+        this.temperatureSensorService.setCharacteristic(this.platform.Characteristic.Name, 'Room Temperature');
+        if (this.platform.Characteristic.ConfiguredName) {
+            this.temperatureSensorService.setCharacteristic(this.platform.Characteristic.ConfiguredName, 'Room Temperature');
+        }
+        this.temperatureSensorService.getCharacteristic(this.platform.Characteristic.CurrentTemperature)
+            .onGet(this.getCurrentTemperature.bind(this));
         // AUXILIARY SWITCHES
         this.displaySwitch = this.createSwitch('AC Display', 'display-switch');
         this.displaySwitch.getCharacteristic(this.platform.Characteristic.On)
             .onSet(async (value) => {
-            this.updateCache('display', value ? 'on' : 'off');
+            this.setOptimisticValue('display', value ? 'on' : 'off');
             await this.device.setDisplayMode(value ? DisplayMode.ON : DisplayMode.OFF);
         })
-            .onGet(() => this.device.getStatus()?.display === 'on');
+            .onGet(() => this.getEffectiveStatus()?.display === 'on');
         this.ecoSwitch = this.createSwitch('Eco Mode', 'eco-switch');
         this.ecoSwitch.getCharacteristic(this.platform.Characteristic.On)
             .onSet(async (value) => {
-            this.updateCache('preset_mode', value ? 'eco' : 'off');
+            this.setOptimisticValue('preset_mode', value ? 'eco' : 'off');
             await this.device.setPresetMode(value ? PresetMode.ECO : PresetMode.NONE);
         })
-            .onGet(() => this.device.getStatus()?.preset_mode === 'eco');
+            .onGet(() => this.getEffectiveStatus()?.preset_mode === 'eco');
         this.powerfulSwitch = this.createSwitch('Powerful', 'powerful-switch');
         this.powerfulSwitch.getCharacteristic(this.platform.Characteristic.On)
             .onSet(async (value) => {
-            this.updateCache('preset_mode', value ? 'boost' : 'off');
+            this.setOptimisticValue('preset_mode', value ? 'boost' : 'off');
             await this.device.setPresetMode(value ? PresetMode.BOOST : PresetMode.NONE);
         })
-            .onGet(() => this.device.getStatus()?.preset_mode === 'boost');
+            .onGet(() => this.getEffectiveStatus()?.preset_mode === 'boost');
         this.cleanSwitch = this.createSwitch('Clean', 'clean-switch');
         this.cleanSwitch.getCharacteristic(this.platform.Characteristic.On)
             .onSet(async (value) => {
-            this.updateCache('preset_mode', value ? 'clean' : 'off');
+            this.setOptimisticValue('preset_mode', value ? 'clean' : 'off');
             await this.device.setPresetMode(value ? PresetMode.CLEAN : PresetMode.NONE);
         })
-            .onGet(() => this.device.getStatus()?.preset_mode === 'clean');
+            .onGet(() => this.getEffectiveStatus()?.preset_mode === 'clean');
         // Remove old switches from cache if they exist
         const oldHSwing = this.accessory.getServiceById(this.platform.Service.Switch, 'hswing-switch');
         if (oldHSwing)
@@ -106,33 +136,29 @@ export class PanasonicMiraieAccessory {
             // wait, let's just ignore the On state and rely on RotationSpeed for actual state changes.
             // Or if On is true, we keep current speed, if false we set to Auto.
             if (!value) {
-                this.updateCache('h_swing', 'auto');
+                this.setOptimisticValue('h_swing', 'auto');
                 await this.device.setHSwingMode(SwingMode.AUTO);
                 this.hSwingService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 0);
             }
         })
-            .onGet(() => {
-            const mode = this.device.getStatus()?.h_swing;
-            // The fan is 'On' if it's not auto, or maybe just always On so the slider is visible
-            return true;
-        });
+            .onGet(() => true);
         this.hSwingService.getCharacteristic(this.platform.Characteristic.RotationSpeed)
             .setProps({ minValue: 0, maxValue: 100, minStep: 20 })
             .onSet(async (value) => {
             const speed = value;
             const mode = this.getSwingModeFromSpeed(speed);
             const modeStr = mode === SwingMode.AUTO ? 'auto' : String(mode);
-            this.updateCache('h_swing', modeStr);
+            this.setOptimisticValue('h_swing', modeStr);
             await this.device.setHSwingMode(mode);
         })
             .onGet(() => {
-            return this.getSwingSpeedFromMode(this.device.getStatus()?.h_swing);
+            return this.getSwingSpeedFromMode(this.getEffectiveStatus()?.h_swing);
         });
         this.vSwingService = this.createFanService('Vertical Swing', 'vswing-fan');
         this.vSwingService.getCharacteristic(this.platform.Characteristic.On)
             .onSet(async (value) => {
             if (!value) {
-                this.updateCache('v_swing', 'auto');
+                this.setOptimisticValue('v_swing', 'auto');
                 await this.device.setVSwingMode(SwingMode.AUTO);
                 this.vSwingService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 0);
             }
@@ -144,29 +170,29 @@ export class PanasonicMiraieAccessory {
             const speed = value;
             const mode = this.getSwingModeFromSpeed(speed);
             const modeStr = mode === SwingMode.AUTO ? 'auto' : String(mode);
-            this.updateCache('v_swing', modeStr);
+            this.setOptimisticValue('v_swing', modeStr);
             await this.device.setVSwingMode(mode);
         })
             .onGet(() => {
-            return this.getSwingSpeedFromMode(this.device.getStatus()?.v_swing);
+            return this.getSwingSpeedFromMode(this.getEffectiveStatus()?.v_swing);
         });
         this.convertiService = this.createFanService('Converti Mode', 'converti-fan');
         this.convertiService.getCharacteristic(this.platform.Characteristic.On)
             .onSet(async (value) => {
             if (!value) {
-                this.updateCache('converti_mode', ConvertiMode.OFF);
+                this.setOptimisticValue('converti_mode', ConvertiMode.OFF);
                 await this.device.setConvertiMode(ConvertiMode.OFF);
                 this.convertiService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 0);
             }
             else {
                 // If turned ON without slider, default to 100% (FC)
-                this.updateCache('converti_mode', ConvertiMode.FC);
+                this.setOptimisticValue('converti_mode', ConvertiMode.FC);
                 await this.device.setConvertiMode(ConvertiMode.FC);
                 this.convertiService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 90);
             }
         })
             .onGet(() => {
-            const mode = this.device.getStatus()?.converti_mode;
+            const mode = this.getEffectiveStatus()?.converti_mode;
             return mode != null && mode !== ConvertiMode.OFF && mode !== ConvertiMode.NS && mode !== 0;
         });
         this.convertiService.getCharacteristic(this.platform.Characteristic.RotationSpeed)
@@ -174,7 +200,7 @@ export class PanasonicMiraieAccessory {
             .onSet(async (value) => {
             const speed = value;
             const mode = this.getConvertiModeFromSpeed(speed);
-            this.updateCache('converti_mode', mode);
+            this.setOptimisticValue('converti_mode', mode);
             await this.device.setConvertiMode(mode);
             if (speed === 0) {
                 this.convertiService.updateCharacteristic(this.platform.Characteristic.On, false);
@@ -184,7 +210,7 @@ export class PanasonicMiraieAccessory {
             }
         })
             .onGet(() => {
-            return this.getConvertiSpeedFromMode(this.device.getStatus()?.converti_mode);
+            return this.getConvertiSpeedFromMode(this.getEffectiveStatus()?.converti_mode);
         });
         // Subscribe to MQTT updates if available to update HomeKit in real-time
         const mqttClient = this.platform.session?.getMqttClient();
@@ -207,12 +233,18 @@ export class PanasonicMiraieAccessory {
         const service = this.accessory.getServiceById(this.platform.Service.Switch, subtype)
             || this.accessory.addService(this.platform.Service.Switch, name, subtype);
         service.setCharacteristic(this.platform.Characteristic.Name, name);
+        if (this.platform.Characteristic.ConfiguredName) {
+            service.setCharacteristic(this.platform.Characteristic.ConfiguredName, name);
+        }
         return service;
     }
     createFanService(name, subtype) {
         const service = this.accessory.getServiceById(this.platform.Service.Fanv2, subtype)
             || this.accessory.addService(this.platform.Service.Fanv2, name, subtype);
         service.setCharacteristic(this.platform.Characteristic.Name, name);
+        if (this.platform.Characteristic.ConfiguredName) {
+            service.setCharacteristic(this.platform.Characteristic.ConfiguredName, name);
+        }
         return service;
     }
     updateHomeKitCharacteristics() {
@@ -225,7 +257,8 @@ export class PanasonicMiraieAccessory {
             this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState, this.getTargetStateSync());
             this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState, this.getCurrentStateSync());
             this.heaterCoolerService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, this.getFanSpeedSync());
-            const status = this.device.getStatus();
+            this.temperatureSensorService.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.getCurrentTemperatureSync());
+            const status = this.getEffectiveStatus();
             if (status) {
                 this.displaySwitch.updateCharacteristic(this.platform.Characteristic.On, status.display === 'on');
                 this.ecoSwitch.updateCharacteristic(this.platform.Characteristic.On, status.preset_mode === 'eco');
@@ -244,17 +277,17 @@ export class PanasonicMiraieAccessory {
     }
     // Sync getters for updateHomeKitCharacteristics
     getActiveSync() {
-        const status = this.device.getStatus();
+        const status = this.getEffectiveStatus();
         return status?.power === 'on'
             ? this.platform.Characteristic.Active.ACTIVE
             : this.platform.Characteristic.Active.INACTIVE;
     }
     getCurrentTemperatureSync() {
-        const status = this.device.getStatus();
+        const status = this.getEffectiveStatus();
         return status?.room_temperature || 24;
     }
     getTargetStateSync() {
-        const status = this.device.getStatus();
+        const status = this.getEffectiveStatus();
         if (!status)
             return this.platform.Characteristic.TargetHeaterCoolerState.AUTO;
         switch (status.mode) {
@@ -264,7 +297,7 @@ export class PanasonicMiraieAccessory {
         }
     }
     getCurrentStateSync() {
-        const status = this.device.getStatus();
+        const status = this.getEffectiveStatus();
         if (!status || status.power === 'off') {
             return this.platform.Characteristic.CurrentHeaterCoolerState.INACTIVE;
         }
@@ -276,7 +309,7 @@ export class PanasonicMiraieAccessory {
         }
     }
     getFanSpeedSync() {
-        const status = this.device.getStatus();
+        const status = this.getEffectiveStatus();
         if (!status)
             return 0;
         switch (status.fan_speed) {
@@ -288,18 +321,10 @@ export class PanasonicMiraieAccessory {
             default: return 0; // Auto mapped to 0 or could just let HomeKit handle auto differently
         }
     }
-    updateCache(key, value) {
-        let status = this.device.getStatus();
-        if (!status) {
-            status = {};
-            this.device.status = status;
-        }
-        status[key] = value;
-    }
     // Characteristic Handlers
     async setActive(value) {
         const isOn = value === this.platform.Characteristic.Active.ACTIVE;
-        this.updateCache('power', isOn ? 'on' : 'off');
+        this.setOptimisticValue('power', isOn ? 'on' : 'off');
         if (isOn) {
             await this.device.turnOn();
         }
@@ -321,7 +346,7 @@ export class PanasonicMiraieAccessory {
             mode = HVACMode.HEAT;
             modeStr = 'heat';
         }
-        this.updateCache('mode', modeStr);
+        this.setOptimisticValue('mode', modeStr);
         await this.device.setHvacMode(mode);
     }
     async getTargetState() {
@@ -335,11 +360,11 @@ export class PanasonicMiraieAccessory {
     }
     async setTargetTemperature(value) {
         const temp = value;
-        this.updateCache('temperature', temp);
+        this.setOptimisticValue('temperature', temp);
         await this.device.setTemperature(temp);
     }
     async getTargetTemperature() {
-        const status = this.device.getStatus();
+        const status = this.getEffectiveStatus();
         return status?.temperature || 24;
     }
     async setFanSpeed(value) {
@@ -362,7 +387,7 @@ export class PanasonicMiraieAccessory {
             mode = FanMode.HIGH;
             modeStr = 'high';
         }
-        this.updateCache('fan_speed', modeStr);
+        this.setOptimisticValue('fan_speed', modeStr);
         await this.device.setFanMode(mode);
     }
     async getFanSpeed() {

@@ -13,6 +13,11 @@ export declare class PanasonicMiraieAccessory {
     private hSwingService;
     private vSwingService;
     private convertiService;
+    private temperatureSensorService;
+    private optimisticState;
+    private optimisticTimeouts;
+    private setOptimisticValue;
+    private getEffectiveStatus;
     constructor(platform: PanasonicMiraiePlatform, accessory: PlatformAccessory, device: FluentDevice);
     private createSwitch;
     private createFanService;
@@ -22,7 +27,6 @@ export declare class PanasonicMiraieAccessory {
     private getTargetStateSync;
     private getCurrentStateSync;
     private getFanSpeedSync;
-    private updateCache;
     setActive(value: CharacteristicValue): Promise<void>;
     getActive(): Promise<CharacteristicValue>;
     setTargetState(value: CharacteristicValue): Promise<void>;
