@@ -15,7 +15,6 @@ export declare class PanasonicMiraieAccessory {
     private convertiService;
     private temperatureSensorService;
     private optimisticState;
-    private optimisticTimeouts;
     private setOptimisticValue;
     private getEffectiveStatus;
     constructor(platform: PanasonicMiraiePlatform, accessory: PlatformAccessory, device: FluentDevice);

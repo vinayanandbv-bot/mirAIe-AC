@@ -18,21 +18,16 @@ export class PanasonicMiraieAccessory {
   private convertiService: Service;
   private temperatureSensorService: Service;
 
-  // Debouncing cache for rubber-banding fix
+  // Persistent cache for rubber-banding fix and startup
   private optimisticState: Record<string, any> = {};
-  private optimisticTimeouts: Record<string, NodeJS.Timeout> = {};
 
   private setOptimisticValue(key: string, value: any) {
     this.optimisticState[key] = value;
-    if (this.optimisticTimeouts[key]) clearTimeout(this.optimisticTimeouts[key]);
-    this.optimisticTimeouts[key] = setTimeout(() => {
-      delete this.optimisticState[key];
-    }, 5000);
   }
 
   private getEffectiveStatus() {
-    const realStatus = this.device.getStatus() || {};
-    return { ...realStatus, ...this.optimisticState };
+    let realStatus = this.device.getStatus();
+    return { ...this.optimisticState, ...(realStatus || {}) };
   }
 
   constructor(
@@ -327,16 +322,17 @@ export class PanasonicMiraieAccessory {
 
   private getCurrentTemperatureSync(): CharacteristicValue {
     const status = this.getEffectiveStatus();
-    return status?.room_temperature || 24;
+    const temp = status?.room_temperature || status?.temperature || 24;
+    return temp;
   }
 
   private getTargetStateSync(): CharacteristicValue {
     const status = this.getEffectiveStatus();
-    if (!status) return this.platform.Characteristic.TargetHeaterCoolerState.AUTO;
+    if (!status) return this.platform.Characteristic.TargetHeaterCoolerState.COOL;
     switch (status.mode) {
       case 'cool': return this.platform.Characteristic.TargetHeaterCoolerState.COOL;
-      case 'heat': return this.platform.Characteristic.TargetHeaterCoolerState.HEAT;
-      default: return this.platform.Characteristic.TargetHeaterCoolerState.AUTO;
+      case 'heat': return this.platform.Characteristic.TargetHeaterCoolerState.COOL; // Override to Cool
+      default: return this.platform.Characteristic.TargetHeaterCoolerState.COOL; // Override to Cool
     }
   }
 
