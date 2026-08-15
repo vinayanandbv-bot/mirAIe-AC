@@ -21,6 +21,7 @@ export declare class PanasonicMiraieAccessory {
     private getTargetStateSync;
     private getCurrentStateSync;
     private getFanSpeedSync;
+    private updateCache;
     setActive(value: CharacteristicValue): Promise<void>;
     getActive(): Promise<CharacteristicValue>;
     setTargetState(value: CharacteristicValue): Promise<void>;

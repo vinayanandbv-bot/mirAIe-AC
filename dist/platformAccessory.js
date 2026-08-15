@@ -51,27 +51,45 @@ export class PanasonicMiraieAccessory {
         // AUXILIARY SWITCHES
         this.displaySwitch = this.createSwitch('AC Display', 'display-switch');
         this.displaySwitch.getCharacteristic(this.platform.Characteristic.On)
-            .onSet(async (value) => { await this.device.setDisplayMode(value ? DisplayMode.ON : DisplayMode.OFF); })
+            .onSet(async (value) => {
+            this.updateCache('display', value ? 'on' : 'off');
+            await this.device.setDisplayMode(value ? DisplayMode.ON : DisplayMode.OFF);
+        })
             .onGet(() => this.device.getStatus()?.display === 'on');
         this.ecoSwitch = this.createSwitch('Eco Mode', 'eco-switch');
         this.ecoSwitch.getCharacteristic(this.platform.Characteristic.On)
-            .onSet(async (value) => { await this.device.setPresetMode(value ? PresetMode.ECO : PresetMode.NONE); })
+            .onSet(async (value) => {
+            this.updateCache('preset_mode', value ? 'eco' : 'off');
+            await this.device.setPresetMode(value ? PresetMode.ECO : PresetMode.NONE);
+        })
             .onGet(() => this.device.getStatus()?.preset_mode === 'eco');
         this.powerfulSwitch = this.createSwitch('Powerful', 'powerful-switch');
         this.powerfulSwitch.getCharacteristic(this.platform.Characteristic.On)
-            .onSet(async (value) => { await this.device.setPresetMode(value ? PresetMode.BOOST : PresetMode.NONE); })
+            .onSet(async (value) => {
+            this.updateCache('preset_mode', value ? 'boost' : 'off');
+            await this.device.setPresetMode(value ? PresetMode.BOOST : PresetMode.NONE);
+        })
             .onGet(() => this.device.getStatus()?.preset_mode === 'boost');
         this.cleanSwitch = this.createSwitch('Clean', 'clean-switch');
         this.cleanSwitch.getCharacteristic(this.platform.Characteristic.On)
-            .onSet(async (value) => { await this.device.setPresetMode(value ? PresetMode.CLEAN : PresetMode.NONE); })
+            .onSet(async (value) => {
+            this.updateCache('preset_mode', value ? 'clean' : 'off');
+            await this.device.setPresetMode(value ? PresetMode.CLEAN : PresetMode.NONE);
+        })
             .onGet(() => this.device.getStatus()?.preset_mode === 'clean');
         this.hSwingSwitch = this.createSwitch('Horizontal Swing', 'hswing-switch');
         this.hSwingSwitch.getCharacteristic(this.platform.Characteristic.On)
-            .onSet(async (value) => { await this.device.setHSwingMode(value ? SwingMode.AUTO : SwingMode.ONE); })
+            .onSet(async (value) => {
+            this.updateCache('h_swing', value ? 'auto' : '1');
+            await this.device.setHSwingMode(value ? SwingMode.AUTO : SwingMode.ONE);
+        })
             .onGet(() => this.device.getStatus()?.h_swing === 'auto');
         this.vSwingSwitch = this.createSwitch('Vertical Swing', 'vswing-switch');
         this.vSwingSwitch.getCharacteristic(this.platform.Characteristic.On)
-            .onSet(async (value) => { await this.device.setVSwingMode(value ? SwingMode.AUTO : SwingMode.ONE); })
+            .onSet(async (value) => {
+            this.updateCache('v_swing', value ? 'auto' : '1');
+            await this.device.setVSwingMode(value ? SwingMode.AUTO : SwingMode.ONE);
+        })
             .onGet(() => this.device.getStatus()?.v_swing === 'auto');
         // CONVERTI7 SWITCHES (40%, 55%, 70%, 80%, 90%, 100%, 110%)
         const convertiModes = [
@@ -87,6 +105,8 @@ export class PanasonicMiraieAccessory {
             const sw = this.createSwitch(cm.name, `converti-${cm.mode}`);
             sw.getCharacteristic(this.platform.Characteristic.On)
                 .onSet(async (value) => {
+                // Optimistically update cache
+                this.updateCache('converti_mode', value ? cm.mode : ConvertiMode.OFF);
                 // If turning on, set this mode. If turning off, set to OFF/NS
                 await this.device.setConvertiMode(value ? cm.mode : ConvertiMode.OFF);
                 // Turn off other converti switches in HomeKit UI
@@ -205,9 +225,19 @@ export class PanasonicMiraieAccessory {
             default: return 0; // Auto mapped to 0 or could just let HomeKit handle auto differently
         }
     }
+    updateCache(key, value) {
+        let status = this.device.getStatus();
+        if (!status) {
+            status = {};
+            this.device.status = status;
+        }
+        status[key] = value;
+    }
     // Characteristic Handlers
     async setActive(value) {
-        if (value === this.platform.Characteristic.Active.ACTIVE) {
+        const isOn = value === this.platform.Characteristic.Active.ACTIVE;
+        this.updateCache('power', isOn ? 'on' : 'off');
+        if (isOn) {
             await this.device.turnOn();
         }
         else {
@@ -219,10 +249,16 @@ export class PanasonicMiraieAccessory {
     }
     async setTargetState(value) {
         let mode = HVACMode.AUTO;
-        if (value === this.platform.Characteristic.TargetHeaterCoolerState.COOL)
+        let modeStr = 'auto';
+        if (value === this.platform.Characteristic.TargetHeaterCoolerState.COOL) {
             mode = HVACMode.COOL;
-        if (value === this.platform.Characteristic.TargetHeaterCoolerState.HEAT)
+            modeStr = 'cool';
+        }
+        if (value === this.platform.Characteristic.TargetHeaterCoolerState.HEAT) {
             mode = HVACMode.HEAT;
+            modeStr = 'heat';
+        }
+        this.updateCache('mode', modeStr);
         await this.device.setHvacMode(mode);
     }
     async getTargetState() {
@@ -235,7 +271,9 @@ export class PanasonicMiraieAccessory {
         return this.getCurrentTemperatureSync();
     }
     async setTargetTemperature(value) {
-        await this.device.setTemperature(value);
+        const temp = value;
+        this.updateCache('temperature', temp);
+        await this.device.setTemperature(temp);
     }
     async getTargetTemperature() {
         const status = this.device.getStatus();
@@ -244,14 +282,24 @@ export class PanasonicMiraieAccessory {
     async setFanSpeed(value) {
         const speed = value;
         let mode = FanMode.AUTO;
-        if (speed > 0 && speed <= 25)
+        let modeStr = 'auto';
+        if (speed > 0 && speed <= 25) {
             mode = FanMode.QUIET;
-        else if (speed > 25 && speed <= 50)
+            modeStr = 'quiet';
+        }
+        else if (speed > 25 && speed <= 50) {
             mode = FanMode.LOW;
-        else if (speed > 50 && speed <= 75)
+            modeStr = 'low';
+        }
+        else if (speed > 50 && speed <= 75) {
             mode = FanMode.MEDIUM;
-        else if (speed > 75)
+            modeStr = 'medium';
+        }
+        else if (speed > 75) {
             mode = FanMode.HIGH;
+            modeStr = 'high';
+        }
+        this.updateCache('fan_speed', modeStr);
         await this.device.setFanMode(mode);
     }
     async getFanSpeed() {
