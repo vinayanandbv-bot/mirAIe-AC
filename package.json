@@ -1,0 +1,28 @@
+{
+  "name": "homebridge-panasonic-miraie-advanced",
+  "version": "1.0.0",
+  "description": "Advanced Homebridge plugin for Panasonic MirAIe ACs",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "homebridge-plugin"
+  ],
+  "engines": {
+    "homebridge": "^1.6.0",
+    "node": "^18.15.0 || ^20.0.0 || ^22.0.0"
+  },
+  "dependencies": {
+    "homebridge": "^1.8.0",
+    "miraie-ac-js": "^1.0.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "@types/node": "^20.12.7"
+  },
+  "author": "Antigravity",
+  "license": "ISC"
+}
