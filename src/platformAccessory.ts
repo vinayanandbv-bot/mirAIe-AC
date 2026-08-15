@@ -313,6 +313,7 @@ export class PanasonicMiraieAccessory {
     const status = this.getEffectiveStatus();
     // Use rmtmp which is the actual room temperature in MirAIe payload!
     const temp = parseFloat(status?.rmtmp) || parseFloat(status?.actmp) || 24;
+    this.platform.log.info(`[DEBUG] getCurrentTemperatureSync: rmtmp=${status?.rmtmp}, actmp=${status?.actmp}, returning=${temp}`);
     return temp;
   }
 

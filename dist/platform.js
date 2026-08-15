@@ -50,7 +50,9 @@ export class PanasonicMiraiePlatform {
             await this.session.subscribeToTopics(topics);
             this.log.info(`Subscribed to status topics: ${topics.join(', ')}`);
             for (const device of devices) {
-                const uuid = this.api.hap.uuid.generate(device.data.deviceId);
+                // Append '-v2' to the deviceId so iOS treats it as a brand new accessory.
+                // This fixes the iOS Home app cache corruption where it remembers the old HeaterCooler states (like 23.0).
+                const uuid = this.api.hap.uuid.generate(device.data.deviceId + '-v2');
                 const existingAccessory = this.accessories.get(uuid);
                 if (existingAccessory) {
                     this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
