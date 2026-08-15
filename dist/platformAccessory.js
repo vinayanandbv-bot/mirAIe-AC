@@ -99,11 +99,12 @@ export class PanasonicMiraieAccessory {
         this.fanModeSwitch = this.createSwitch('Fan Only Mode', 'fan-only-mode');
         this.fanModeSwitch.getCharacteristic(this.platform.Characteristic.On)
             .onSet(async (value) => {
+            const displayShouldBeOn = this.displaySwitch.getCharacteristic(this.platform.Characteristic.On).value;
             if (value) {
                 this.setOptimisticValue('ps', 'on');
                 this.setOptimisticValue('acmd', 'fan');
                 await this.device.turnOn();
-                this.enforceDisplayState();
+                this.enforceDisplayState(displayShouldBeOn);
                 await this.device.setHvacMode(HVACMode.FAN);
             }
             else {
@@ -352,9 +353,11 @@ export class PanasonicMiraieAccessory {
     async setTargetState(value) {
         const isOn = value !== this.platform.Characteristic.TargetHeatingCoolingState.OFF;
         this.setOptimisticValue('ps', isOn ? 'on' : 'off');
+        // CAPTURE display state BEFORE the AC boots and sends poisoned MQTT payloads!
+        const displayShouldBeOn = this.displaySwitch.getCharacteristic(this.platform.Characteristic.On).value;
         if (isOn) {
             await this.device.turnOn();
-            this.enforceDisplayState();
+            this.enforceDisplayState(displayShouldBeOn);
             if (value === this.platform.Characteristic.TargetHeatingCoolingState.AUTO) {
                 this.setOptimisticValue('acmd', 'auto');
                 await this.device.setHvacMode(HVACMode.AUTO);
@@ -372,18 +375,18 @@ export class PanasonicMiraieAccessory {
         }
         else {
             await this.device.turnOff();
-            this.enforceDisplayState();
+            this.enforceDisplayState(displayShouldBeOn);
         }
     }
-    async enforceDisplayState() {
+    async enforceDisplayState(displayShouldBeOn) {
         // Wait 4 seconds to let the physical AC finish its power-on/off beep and firmware routine
         await new Promise(resolve => setTimeout(resolve, 4000));
-        // Read the user's desired display state from our optimistic cache
-        const displayShouldBeOn = this.getEffectiveStatus()?.acdc === 'on';
         this.platform.log.info(`[DEBUG] enforceDisplayState fired. displayShouldBeOn=${displayShouldBeOn}`);
         // Force the AC to obey the user's display toggle
         try {
             await this.device.setDisplayMode(displayShouldBeOn ? DisplayMode.ON : DisplayMode.OFF);
+            // Ensure the UI switch is forced back to what it should be (in case MQTT corrupted it during boot)
+            this.displaySwitch.updateCharacteristic(this.platform.Characteristic.On, displayShouldBeOn);
             this.platform.log.info(`[DEBUG] enforceDisplayState successfully sent ${displayShouldBeOn ? 'ON' : 'OFF'}`);
         }
         catch (err) {
