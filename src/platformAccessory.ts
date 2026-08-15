@@ -13,8 +13,8 @@ export class PanasonicMiraieAccessory {
   private ecoSwitch: Service;
   private powerfulSwitch: Service;
   private cleanSwitch: Service;
-  private hSwingService: Service;
-  private vSwingService: Service;
+  private hSwingTvService?: Service;
+  private vSwingTvService?: Service;
   private convertiService: Service;
   private mainFanService: Service;
 
@@ -136,54 +136,8 @@ export class PanasonicMiraieAccessory {
     const oldConvertiOFF = this.accessory.getServiceById(this.platform.Service.Switch, `converti-0`);
     if (oldConvertiOFF) this.accessory.removeService(oldConvertiOFF);
 
-    this.hSwingService = this.createFanService('Horizontal Swing', 'hswing-fan');
-    this.hSwingService.getCharacteristic(this.platform.Characteristic.On)
-      .onSet(async (value) => {
-        if (!value) {
-          this.setOptimisticValue('achs', 0);
-          await this.device.setHSwingMode(SwingMode.AUTO);
-          this.hSwingService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 0);
-        }
-      })
-      .onGet(() => true);
-
-    this.hSwingService.getCharacteristic(this.platform.Characteristic.RotationSpeed)
-      .setProps({ minValue: 0, maxValue: 100, minStep: 20 })
-      .onSet(async (value) => {
-        const speed = value as number;
-        const mode = this.getSwingModeFromSpeed(speed);
-        const modeStr = mode === SwingMode.AUTO ? 0 : mode;
-        this.setOptimisticValue('achs', modeStr);
-        await this.device.setHSwingMode(mode);
-      })
-      .onGet(() => {
-        return this.getSwingSpeedFromMode(this.getEffectiveStatus()?.achs);
-      });
-
-
-    this.vSwingService = this.createFanService('Vertical Swing', 'vswing-fan');
-    this.vSwingService.getCharacteristic(this.platform.Characteristic.On)
-      .onSet(async (value) => {
-        if (!value) {
-          this.setOptimisticValue('acvs', 0);
-          await this.device.setVSwingMode(SwingMode.AUTO);
-          this.vSwingService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 0);
-        }
-      })
-      .onGet(() => true);
-
-    this.vSwingService.getCharacteristic(this.platform.Characteristic.RotationSpeed)
-      .setProps({ minValue: 0, maxValue: 100, minStep: 20 })
-      .onSet(async (value) => {
-        const speed = value as number;
-        const mode = this.getSwingModeFromSpeed(speed);
-        const modeStr = mode === SwingMode.AUTO ? 0 : mode;
-        this.setOptimisticValue('acvs', modeStr);
-        await this.device.setVSwingMode(mode);
-      })
-      .onGet(() => {
-        return this.getSwingSpeedFromMode(this.getEffectiveStatus()?.acvs);
-      });
+    this.hSwingTvService = this.createSwingTV('Horizontal Swing', 'h');
+    this.vSwingTvService = this.createSwingTV('Vertical Swing', 'v');
 
 
     this.convertiService = this.createFanService('Converti Mode', 'converti-fan');
@@ -249,7 +203,61 @@ export class PanasonicMiraieAccessory {
     }
     return service;
   }
+  private createSwingTV(name: string, swingType: 'h' | 'v'): Service {
+    const tvUuid = this.platform.api.hap.uuid.generate(this.device.data.deviceId + '-tv-' + swingType);
+    const tvAccessory = new this.platform.api.platformAccessory(name, tvUuid, this.platform.api.hap.Categories.TELEVISION);
+    
+    const tvService = tvAccessory.addService(this.platform.Service.Television, name, 'tv');
+    tvService.setCharacteristic(this.platform.Characteristic.ConfiguredName, name);
+    tvService.setCharacteristic(this.platform.Characteristic.SleepDiscoveryMode, this.platform.Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE);
+    
+    const stateKey = swingType === 'h' ? 'achs' : 'acvs';
+    
+    tvService.getCharacteristic(this.platform.Characteristic.Active)
+      .onSet(async (value) => {
+         if (!value) {
+           this.setOptimisticValue(stateKey, 0);
+           if (swingType === 'h') await this.device.setHSwingMode(SwingMode.AUTO);
+           else await this.device.setVSwingMode(SwingMode.AUTO);
+         }
+      })
+      .onGet(() => this.platform.Characteristic.Active.ACTIVE);
+      
+    tvService.getCharacteristic(this.platform.Characteristic.ActiveIdentifier)
+      .onSet(async (value) => {
+         const modeId = value as number;
+         this.setOptimisticValue(stateKey, modeId);
+         if (swingType === 'h') await this.device.setHSwingMode(modeId as SwingMode);
+         else await this.device.setVSwingMode(modeId as SwingMode);
+      })
+      .onGet(() => {
+         const mode = this.getEffectiveStatus()?.[stateKey];
+         return (typeof mode === 'number' && mode >= 0 && mode <= 5) ? mode : 0;
+      });
 
+    const modes = [
+      { id: 0, name: 'Auto' },
+      { id: 1, name: 'Position 1' },
+      { id: 2, name: 'Position 2' },
+      { id: 3, name: 'Position 3' },
+      { id: 4, name: 'Position 4' },
+      { id: 5, name: 'Position 5' }
+    ];
+
+    for (const mode of modes) {
+      const inputService = tvAccessory.addService(this.platform.Service.InputSource, mode.name, 'input' + mode.id);
+      inputService.setCharacteristic(this.platform.Characteristic.Identifier, mode.id)
+                  .setCharacteristic(this.platform.Characteristic.ConfiguredName, mode.name)
+                  .setCharacteristic(this.platform.Characteristic.IsConfigured, this.platform.Characteristic.IsConfigured.CONFIGURED)
+                  .setCharacteristic(this.platform.Characteristic.InputSourceType, this.platform.Characteristic.InputSourceType.OTHER)
+                  .setCharacteristic(this.platform.Characteristic.CurrentVisibilityState, this.platform.Characteristic.CurrentVisibilityState.SHOWN);
+      
+      tvService.addLinkedService(inputService);
+    }
+    
+    this.platform.api.publishExternalAccessories('homebridge-miraie-ac', [tvAccessory]);
+    return tvService;
+  }
   private createFanService(name: string, subtype: string): Service {
     const service = this.accessory.getServiceById(this.platform.Service.Fanv2, subtype) 
       || this.accessory.addService(this.platform.Service.Fanv2, name, subtype);
@@ -280,9 +288,14 @@ export class PanasonicMiraieAccessory {
         this.displaySwitch.updateCharacteristic(this.platform.Characteristic.On, status.acdc === 'on');
         this.ecoSwitch.updateCharacteristic(this.platform.Characteristic.On, status.acec === 'on' || status.acem === 'on');
         this.powerfulSwitch.updateCharacteristic(this.platform.Characteristic.On, status.acpm === 'on');
-        // clean mode usually sets acec to on
-        this.hSwingService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, this.getSwingSpeedFromMode(status.achs));
-        this.vSwingService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, this.getSwingSpeedFromMode(status.acvs));
+        
+        let hMode = parseInt(status.achs) || 0;
+        if (hMode < 0 || hMode > 5) hMode = 0;
+        this.hSwingTvService?.updateCharacteristic(this.platform.Characteristic.ActiveIdentifier, hMode);
+        
+        let vMode = parseInt(status.acvs) || 0;
+        if (vMode < 0 || vMode > 5) vMode = 0;
+        this.vSwingTvService?.updateCharacteristic(this.platform.Characteristic.ActiveIdentifier, vMode);
         
         const convertiSpeed = this.getConvertiSpeedFromMode(status.cnv);
         this.convertiService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, convertiSpeed);
@@ -404,22 +417,5 @@ export class PanasonicMiraieAccessory {
     return ConvertiMode.HC;
   }
 
-  private getSwingSpeedFromMode(mode: any): number {
-    const s = String(mode);
-    if (s === '1' || s === String(SwingMode.ONE)) return 20;
-    if (s === '2' || s === String(SwingMode.TWO)) return 40;
-    if (s === '3' || s === String(SwingMode.THREE)) return 60;
-    if (s === '4' || s === String(SwingMode.FOUR)) return 80;
-    if (s === '5' || s === String(SwingMode.FIVE)) return 100;
-    return 0; // Auto
-  }
 
-  private getSwingModeFromSpeed(speed: number): SwingMode {
-    if (speed === 0) return SwingMode.AUTO;
-    if (speed <= 20) return SwingMode.ONE;
-    if (speed <= 40) return SwingMode.TWO;
-    if (speed <= 60) return SwingMode.THREE;
-    if (speed <= 80) return SwingMode.FOUR;
-    return SwingMode.FIVE;
-  }
 }
