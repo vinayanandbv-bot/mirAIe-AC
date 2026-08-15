@@ -10,6 +10,8 @@ export declare class PanasonicMiraieAccessory {
     private ecoSwitch;
     private powerfulSwitch;
     private cleanSwitch;
+    private drySwitch;
+    private fanModeSwitch;
     private hSwingService;
     private vSwingService;
     private convertiService;
