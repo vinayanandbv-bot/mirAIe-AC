@@ -204,10 +204,12 @@ export class PanasonicMiraieAccessory {
     return service;
   }
   private createSwingTV(name: string, swingType: 'h' | 'v'): Service {
-    const tvUuid = this.platform.api.hap.uuid.generate(this.device.data.deviceId + '-tv-' + swingType);
-    const tvAccessory = new this.platform.api.platformAccessory(name, tvUuid, this.platform.api.hap.Categories.TELEVISION);
+    const subtype = 'tv-' + swingType;
+    let tvService = this.accessory.getServiceById(this.platform.Service.Television, subtype);
+    if (!tvService) {
+      tvService = this.accessory.addService(this.platform.Service.Television, name, subtype);
+    }
     
-    const tvService = tvAccessory.addService(this.platform.Service.Television, name, 'tv');
     tvService.setCharacteristic(this.platform.Characteristic.ConfiguredName, name);
     tvService.setCharacteristic(this.platform.Characteristic.SleepDiscoveryMode, this.platform.Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE);
     
@@ -245,7 +247,12 @@ export class PanasonicMiraieAccessory {
     ];
 
     for (const mode of modes) {
-      const inputService = tvAccessory.addService(this.platform.Service.InputSource, mode.name, 'input' + mode.id);
+      const inputSubtype = 'input-' + swingType + '-' + mode.id;
+      let inputService = this.accessory.getServiceById(this.platform.Service.InputSource, inputSubtype);
+      if (!inputService) {
+        inputService = this.accessory.addService(this.platform.Service.InputSource, mode.name, inputSubtype);
+      }
+      
       inputService.setCharacteristic(this.platform.Characteristic.Identifier, mode.id)
                   .setCharacteristic(this.platform.Characteristic.ConfiguredName, mode.name)
                   .setCharacteristic(this.platform.Characteristic.IsConfigured, this.platform.Characteristic.IsConfigured.CONFIGURED)
@@ -255,7 +262,6 @@ export class PanasonicMiraieAccessory {
       tvService.addLinkedService(inputService);
     }
     
-    this.platform.api.publishExternalAccessories('homebridge-miraie-ac', [tvAccessory]);
     return tvService;
   }
   private createFanService(name: string, subtype: string): Service {

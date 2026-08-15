@@ -183,9 +183,11 @@ export class PanasonicMiraieAccessory {
         return service;
     }
     createSwingTV(name, swingType) {
-        const tvUuid = this.platform.api.hap.uuid.generate(this.device.data.deviceId + '-tv-' + swingType);
-        const tvAccessory = new this.platform.api.platformAccessory(name, tvUuid, 31 /* this.platform.api.hap.Categories.TELEVISION */);
-        const tvService = tvAccessory.addService(this.platform.Service.Television, name, 'tv');
+        const subtype = 'tv-' + swingType;
+        let tvService = this.accessory.getServiceById(this.platform.Service.Television, subtype);
+        if (!tvService) {
+            tvService = this.accessory.addService(this.platform.Service.Television, name, subtype);
+        }
         tvService.setCharacteristic(this.platform.Characteristic.ConfiguredName, name);
         tvService.setCharacteristic(this.platform.Characteristic.SleepDiscoveryMode, this.platform.Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE);
         const stateKey = swingType === 'h' ? 'achs' : 'acvs';
@@ -222,7 +224,11 @@ export class PanasonicMiraieAccessory {
             { id: 5, name: 'Position 5' }
         ];
         for (const mode of modes) {
-            const inputService = tvAccessory.addService(this.platform.Service.InputSource, mode.name, 'input' + mode.id);
+            const inputSubtype = 'input-' + swingType + '-' + mode.id;
+            let inputService = this.accessory.getServiceById(this.platform.Service.InputSource, inputSubtype);
+            if (!inputService) {
+                inputService = this.accessory.addService(this.platform.Service.InputSource, mode.name, inputSubtype);
+            }
             inputService.setCharacteristic(this.platform.Characteristic.Identifier, mode.id)
                 .setCharacteristic(this.platform.Characteristic.ConfiguredName, mode.name)
                 .setCharacteristic(this.platform.Characteristic.IsConfigured, this.platform.Characteristic.IsConfigured.CONFIGURED)
@@ -230,7 +236,6 @@ export class PanasonicMiraieAccessory {
                 .setCharacteristic(this.platform.Characteristic.CurrentVisibilityState, this.platform.Characteristic.CurrentVisibilityState.SHOWN);
             tvService.addLinkedService(inputService);
         }
-        this.platform.api.publishExternalAccessories('homebridge-miraie-ac', [tvAccessory]);
         return tvService;
     }
     createFanService(name, subtype) {
