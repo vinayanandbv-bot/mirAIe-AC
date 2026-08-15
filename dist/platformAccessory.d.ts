@@ -1,0 +1,34 @@
+import { PlatformAccessory, CharacteristicValue } from 'homebridge';
+import { PanasonicMiraiePlatform } from './platform.js';
+import { FluentDevice } from 'miraie-ac-js';
+export declare class PanasonicMiraieAccessory {
+    private readonly platform;
+    private readonly accessory;
+    private readonly device;
+    private heaterCoolerService;
+    private displaySwitch;
+    private ecoSwitch;
+    private powerfulSwitch;
+    private cleanSwitch;
+    private hSwingSwitch;
+    private vSwingSwitch;
+    private convertiSwitches;
+    constructor(platform: PanasonicMiraiePlatform, accessory: PlatformAccessory, device: FluentDevice);
+    private createSwitch;
+    private updateHomeKitCharacteristics;
+    private getActiveSync;
+    private getCurrentTemperatureSync;
+    private getTargetStateSync;
+    private getCurrentStateSync;
+    private getFanSpeedSync;
+    setActive(value: CharacteristicValue): Promise<void>;
+    getActive(): Promise<CharacteristicValue>;
+    setTargetState(value: CharacteristicValue): Promise<void>;
+    getTargetState(): Promise<CharacteristicValue>;
+    getCurrentState(): Promise<CharacteristicValue>;
+    getCurrentTemperature(): Promise<CharacteristicValue>;
+    setTargetTemperature(value: CharacteristicValue): Promise<void>;
+    getTargetTemperature(): Promise<CharacteristicValue>;
+    setFanSpeed(value: CharacteristicValue): Promise<void>;
+    getFanSpeed(): Promise<CharacteristicValue>;
+}
