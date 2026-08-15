@@ -227,7 +227,10 @@ export class PanasonicMiraieAccessory {
       mqttClient.on('message', (topic: string, message: Buffer) => {
         if (topic.includes(this.device.data.topic[0])) {
           try {
-            this.platform.log.info('MQTT UPDATE RECEIVED:', message.toString());
+            const raw = JSON.parse(message.toString());
+            this.platform.log.info('Intercepted MQTT Temp:', raw.rmtmp);
+            // Bypass miraie-ac-js parsing completely and inject directly into our state cache
+            Object.assign(this.optimisticState, raw);
             this.updateHomeKitCharacteristics();
           } catch (e) {
             this.platform.log.error('Error handling mqtt message', e);
