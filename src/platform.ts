@@ -86,6 +86,16 @@ export class PanasonicMiraiePlatform implements DynamicPlatformPlugin {
           this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
         }
       }
+
+      // Cleanup stale accessories
+      const validUuids = devices.map(device => this.api.hap.uuid.generate(device.data.deviceId + '-v3'));
+      for (const [uuid, accessory] of this.accessories) {
+        if (!validUuids.includes(uuid)) {
+          this.log.info('Removing stale cached accessory:', accessory.displayName);
+          this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+          this.accessories.delete(uuid);
+        }
+      }
     } catch (err) {
       this.log.error('Failed to discover devices:', err);
     }
